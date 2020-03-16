@@ -5,5 +5,5 @@ The smallest floating point supported by numpy and python is half(16bits). Somes
 
 ## Related work 
 
-* [LiraNuna - ieee754] (https://github.com/LiraNuna/soft-ieee754)
+* [LiraNuna - ieee754](https://github.com/LiraNuna/soft-ieee754)
     - My projects is simply python wrapper around it.
