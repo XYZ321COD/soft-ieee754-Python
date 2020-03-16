@@ -1,0 +1,289 @@
+/* #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION */
+
+#include <Python.h>
+#include <stddef.h>
+
+#include <numpy/arrayobject.h>
+#include <numpy/ufuncobject.h>
+
+#include "pyfloat.hpp"
+#include "number.hpp"
+PyArray_ArrFuncs NpyFloat_ArrFuncs;
+
+typedef struct { char c; float8bit q; } align_test;
+
+PyArray_Descr npyfloat_descr = {
+    PyObject_HEAD_INIT(0)
+    &PyFlt_Type,       /* typeobj */
+    'f',                /* kind */
+    'q',                /* type */
+    '=',                /* byteorder */
+    /*
+     * For now, we need NPY_NEEDS_PYAPI in order to make numpy detect our
+     * exceptions.  This isn't technically necessary,
+     * since we're careful about thread safety, and hopefully future
+     * versions of numpy will recognize that.
+     */
+    NPY_NEEDS_PYAPI | NPY_USE_GETITEM | NPY_USE_SETITEM, /* hasobject */
+    0,                      /* type_num */
+    sizeof(float8bit),       /* elsize */
+    offsetof(align_test, q), /* alignment */
+    0,                      /* subarray */
+    0,                      /* fields */
+    0,                      /* names */
+    &NpyFloat_ArrFuncs,  /* f */
+    0,                      /* metadata */
+    0,
+};
+
+static PyObject *
+npyfloat_getitem(char *data, PyArrayObject *NPY_UNUSED(arr))
+{
+    float8bit q;
+
+    memcpy(&q, data, sizeof(q));
+    return PyFlt_FromFlt(q);
+}
+
+static int
+npyfloat_setitem(PyObject *item, void *data, void *NPY_UNUSED(arr))
+{
+    float8bit q;
+
+    if (PyFlt_Check(item)) {
+        q = ((PyFlt*)item)->obval;
+        memcpy(data, &q, sizeof(q));
+        return 0;
+    } else  {
+        PyErr_Format(PyExc_TypeError,
+                "%s: expected myfloat, got %s", __func__, item->ob_type->tp_name);
+        return -1;
+    }
+}
+
+static void
+byteswap(float8bit* x)
+{
+    size_t n = sizeof(float8bit), i;
+    union swapped {
+        float8bit* value;
+        char* data;
+    } s = {x};
+    char tmp;
+
+    for (i = 0; i < n; ++i) {
+        tmp = s.data[i];
+        s.data[i] = s.data[n - i -1];
+        s.data[n - i - 1] = tmp;
+    }
+}
+
+static void
+npyfloat_copyswap(void* dst, void* src, int swap, void* NPY_UNUSED(arr))
+{
+    float8bit *q;
+
+    if (!src) {
+        return;
+    }
+    q = (float8bit*)dst;
+    /* FIXME: memmove vs memcpy */
+    memmove(q, src, sizeof(*q));
+    if (swap) {
+        byteswap(q);
+    }
+}
+
+/**begin repeat
+ * #from_type = npy_int8, npy_int16, npy_int32, npy_int64, float, double, long double#
+ * #from_type_name = int8, int16, int32, int64, float, double, ldouble#
+ * #from_npy_define = NPY_INT8, NPY_INT16, NPY_INT32, NPY_INT64, NPY_FLOAT, NPY_DOUBLE, NPY_LONGDOUBLE#
+ */
+static void
+npycast_@from_type_name@_to_flt(void* from, void* to, npy_intp n, void* NPY_UNUSED(fromarr), void* NPY_UNUSED(toarr))
+{
+    const @from_type@ *typed_from = (@from_type@*)from;
+    float8bit *typed_to = (float8bit*)to;
+    npy_intp i;
+
+    for (i = 0; i < n; i++) {
+        typed_to[i] = (float8bit)typed_from[i];
+    }
+}
+
+static int register_@from_type_name@_to_flt_cast(int npy_registered_floatnum)
+{
+    PyArray_Descr* from_descr = PyArray_DescrFromType(@from_npy_define@);
+    int safe = 1;
+
+    if (PyArray_RegisterCastFunc(from_descr, npy_registered_floatnum, npycast_@from_type_name@_to_flt) < 0) {
+        return -1;
+    }
+    if (safe && PyArray_RegisterCanCast(from_descr, npy_registered_floatnum, NPY_NOSCALAR) < 0) {
+        return -1;
+    }
+
+    return 0;
+}
+
+/**end repeat**/
+
+
+/**begin repeat
+ * #to_type = npy_int8, npy_int16, npy_int32, npy_int64, float, double, long double#
+ * #to_type_name = int8, int16, int32, int64, float, double, ldouble#
+ */
+static void
+npycast_flt_to_@to_type_name@(void* from, void* to, npy_intp n, void* NPY_UNUSED(fromarr), void* NPY_UNUSED(toarr))
+{
+    const float8bit *typed_from = (float8bit*)from;
+    @to_type@ *typed_to = (@to_type@*)to;
+    npy_intp i;
+
+    for (i = 0; i < n; i++) {
+        typed_to[i] = (@to_type@)typed_from[i];
+    }
+}
+
+static int register_myfloat_to_@to_type_name@_cast(int npy_registered_floatnum)
+{
+    PyArray_Descr* from_descr = &npyfloat_descr;
+
+    if (PyArray_RegisterCastFunc(from_descr, npy_registered_floatnum, npycast_flt_to_@to_type_name@) < 0) {
+        return -1;
+    }
+
+    return 0;
+}
+/**end repeat**/
+
+
+/*
+ * ufunc
+ */
+void
+float_ufunc_add(char** args, npy_intp* dimensions, npy_intp* steps,
+	       void* data)
+{
+    npy_intp is0 = steps[0], is1 = steps[1], os = steps[2], n = *dimensions;
+    char *i0 = args[0], *i1 = args[1], *o = args[2];
+    int k;
+
+    for (k = 0; k < n; k++) {
+        float8bit x = *(float8bit*)i0;
+        float8bit y = *(float8bit*)i1;
+        *(float8bit*)o = x + y;
+        i0 += is0; i1 += is1; o += os;
+    }
+}
+
+int
+register_ufuncs(PyObject* np_module, int npy_registered_floatnum)
+{
+    PyUFuncObject* ufunc = (PyUFuncObject*)
+		PyObject_GetAttrString(np_module, "add");
+    int args[3] = {npy_registered_floatnum, npy_registered_floatnum,
+		   npy_registered_floatnum};
+
+    if (!ufunc) {
+        return -1;
+    }
+    if (ufunc->nargs != 3) {
+        PyErr_Format(PyExc_AssertionError,
+		 "ufunc %s takes %d arguments, our loop takes %d", 
+                 "add", ufunc->nargs, 3);
+        return -1;
+    }
+    if (PyUFunc_RegisterLoopForType(ufunc, npy_registered_floatnum,
+				    float_ufunc_add, args, 0) < 0) {
+        return -1;
+    }
+
+    return 0;
+}
+
+static int register_cast_functions(int npy_registered_floatnum)
+{
+/**begin repeat
+ * #to_type_name = int8, int16, int32, int64, float, double, ldouble#
+ */
+    if(register_@to_type_name@_to_flt_cast(npy_registered_floatnum) < 0) {
+        return -1;
+    }
+    if(register_myfloat_to_@to_type_name@_cast(npy_registered_floatnum) < 0) {
+        return -1;
+    }
+/**end repeat**/
+    return 0;
+}
+
+void
+init_float_descriptor(PyObject* np_module)
+{
+    int npy_registered_floatnum;
+
+    PyArray_InitArrFuncs(&NpyFloat_ArrFuncs);
+    NpyFloat_ArrFuncs.getitem = (PyArray_GetItemFunc*)npyfloat_getitem;
+    NpyFloat_ArrFuncs.setitem = (PyArray_SetItemFunc*)npyfloat_setitem;
+    NpyFloat_ArrFuncs.copyswap = (PyArray_CopySwapFunc*)npyfloat_copyswap;
+
+    npyfloat_descr.ob_type = &PyArrayDescr_Type;
+    npy_registered_floatnum = PyArray_RegisterDataType(&npyfloat_descr);
+    if (npy_registered_floatnum < 0) {
+        return;
+    }
+
+    /* Support dtype(float8bit) syntax */
+    if (PyDict_SetItemString(PyFloat_Type.tp_dict, "dtype",
+			     (PyObject*)&npyfloat_descr) < 0) {
+        return;
+    }
+
+    if (register_cast_functions(npy_registered_floatnum) < 0) {
+        return;
+    }
+
+    if (register_ufuncs(np_module, npy_registered_floatnum) < 0) {
+        return;
+    }
+}
+
+
+/*
+ * Module initialization boilerplate
+ */
+static PyMethodDef ModuleMethods[] = {
+    {NULL, NULL, 0, NULL}
+};
+
+
+PyMODINIT_FUNC init_float(void)
+{
+    PyObject *m;
+    PyObject *np_module;
+    PyObject *s;
+
+    import_array();
+    if (PyErr_Occurred()) {
+        return;
+    }
+    import_umath();
+    if (PyErr_Occurred()) {
+        return;
+    }
+
+    s = PyString_FromString("numpy");
+    if (!s) {
+        return;
+    }
+    np_module = PyImport_Import(s);
+    Py_DECREF(s);
+
+    m = Py_InitModule("_float", ModuleMethods);
+    if (m == NULL) {
+        return;
+    }
+    init_flt_type(m, &PyGenericArrType_Type);
+
+    init_float_descriptor(np_module);
+}
