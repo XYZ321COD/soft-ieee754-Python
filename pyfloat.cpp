@@ -57,6 +57,21 @@ pyfloat_repr(PyObject *self)
     return PyString_FromString(str);
 }
 
+PyObject *
+castToFloat(PyObject *self)
+{
+    float8bit q = ((PyFlt*)self)->obval;
+    return PyFloat_FromDouble(float(q)); 
+}
+
+
+static PyMethodDef Float_methods[] = {
+    {"castToFloat", (PyCFunction)castToFloat, METH_NOARGS,
+     "Return the 32bit float representation"
+    },
+    {NULL}  /* Sentinel */
+};
+
 PyTypeObject PyFlt_Type = {
     PyObject_HEAD_INIT(NULL)
     0,                                        /* ob_size */
@@ -86,7 +101,7 @@ PyTypeObject PyFlt_Type = {
     0,                                        /* tp_weaklistoffset */
     0,                                        /* tp_iter */
     0,                                        /* tp_iternext */
-    0,                                        /* tp_methods */
+    Float_methods,                                        /* tp_methods */
     0,                                        /* tp_members */
     0,        			              /* tp_getset */
     0,                                        /* tp_base */

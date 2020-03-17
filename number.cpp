@@ -29,6 +29,7 @@ float_divide(float8bit x, float8bit y)
     return x / y;
 }
 
+
 #define _FLOAT_BINOP_IMPL(name, binop) \
     PyObject* \
     pyfloat_##name(PyObject* a, PyObject* b) { \
