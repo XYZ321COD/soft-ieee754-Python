@@ -327,7 +327,6 @@ class IEEE754 {
 		}
 
 		friend IEEE754 operator - (const IEEE754 &lhs, const IEEE754 &rhs) {
-			std::cout<< "GBSSSS";
 			if(std::isunordered(lhs, rhs))
 				return nan();
 			if(std::isinf(lhs) || std::isinf(rhs)) {

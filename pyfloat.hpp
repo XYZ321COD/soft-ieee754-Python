@@ -4,12 +4,12 @@
 #include "common.hpp"
 
 int PyFlt_Check(PyObject* object);
-float8bit PyFlt_AsFlt(PyObject* p);
-PyObject* PyFlt_FromFlt(float8bit x);
+ieee754 PyFlt_AsFlt(PyObject* p);
+PyObject* PyFlt_FromFlt(ieee754 x);
 
 typedef struct {
         PyObject_HEAD
-        float8bit obval;
+        ieee754 obval;
 } PyFlt;
 
 extern PyTypeObject PyFlt_Type;

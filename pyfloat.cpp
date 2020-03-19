@@ -8,7 +8,7 @@ PyFlt_Check(PyObject* object)
 }
 
 PyObject*
-PyFlt_FromFlt(float8bit x)
+PyFlt_FromFlt(ieee754 x)
 {
     PyFlt* p = (PyFlt*)PyFlt_Type.tp_alloc(&PyFlt_Type, 0);
     if (p) {
@@ -19,12 +19,12 @@ PyFlt_FromFlt(float8bit x)
 
 PyObject *
 pyfloat_new(PyTypeObject *NPY_UNUSED(type), PyObject *args, PyObject *NPY_UNUSED(kwds)) {
-     float c_literal;
+     float c_float;
     
-    if(!PyArg_ParseTuple(args,"f", &c_literal)) // Turn string into  flaot
+    if(!PyArg_ParseTuple(args,"f", &c_float)) 
         return NULL;
     
-    float8bit q = c_literal;
+    ieee754 q = c_float;
     return PyFlt_FromFlt(q);
 }
 
@@ -34,7 +34,7 @@ pyfloat_str(PyObject *self)
 {
     char str[128];
     int st;
-    float8bit q = ((PyFlt*)self)->obval;
+    ieee754 q = ((PyFlt*)self)->obval;
 
     st = snprintf(str, sizeof(str), "%f", float(q));
     if (st < 0) {
@@ -48,7 +48,7 @@ pyfloat_repr(PyObject *self)
 {
     char str[128];
     int st;
-    float8bit q = ((PyFlt*)self)->obval;
+    ieee754 q = ((PyFlt*)self)->obval;
 
     st = snprintf(str, sizeof(str), "%f", float(q));
     if (st < 0) {
@@ -60,7 +60,7 @@ pyfloat_repr(PyObject *self)
 PyObject *
 castToFloat(PyObject *self)
 {
-    float8bit q = ((PyFlt*)self)->obval;
+    ieee754 q = ((PyFlt*)self)->obval;
     return PyFloat_FromDouble(float(q)); 
 }
 
@@ -126,7 +126,9 @@ PyTypeObject PyFlt_Type = {
 int
 init_flt_type(PyObject *m, PyTypeObject* tp)
 {
-    PyFloat_Type.tp_base = tp;
+    PyFlt_Type.tp_base = tp;
+    PyFlt_Type.tp_new = pyfloat_new;
+
     if (PyType_Ready(&PyFlt_Type) < 0) {
         return 0;
     }

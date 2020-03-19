@@ -2,7 +2,7 @@
 
 #include <Python.h>
 #include <stddef.h>
-
+#include <iostream>
 #include <numpy/arrayobject.h>
 #include <numpy/ufuncobject.h>
 
@@ -10,7 +10,38 @@
 #include "number.hpp"
 PyArray_ArrFuncs NpyFloat_ArrFuncs;
 
-typedef struct { char c; float8bit q; } align_test;
+static inline float 
+ieee754_as_float(ieee754 x) {
+    return (float) x;
+}
+
+static inline double
+ieee754_as_double(ieee754 x) {
+    return (double) x;
+}
+
+static inline npy_uint32 
+ieee754_as_longdouble(ieee754 x) {
+    return (npy_uint32) x;
+}
+
+static inline double
+ieee754_as_Cdouble(ieee754 x) {
+    return (double) x;
+}
+
+static inline float 
+ieee754_as_Cfloat(ieee754 x) {
+    return (float) x;
+}
+
+static inline npy_half
+ieee754_as_half(ieee754 x) {
+    return (npy_half) x;
+}
+
+
+typedef struct { char c; ieee754 q; } align_test;
 
 PyArray_Descr npyfloat_descr = {
     PyObject_HEAD_INIT(0)
@@ -26,7 +57,7 @@ PyArray_Descr npyfloat_descr = {
      */
     NPY_NEEDS_PYAPI | NPY_USE_GETITEM | NPY_USE_SETITEM, /* hasobject */
     0,                      /* type_num */
-    sizeof(float8bit),       /* elsize */
+    sizeof(ieee754),       /* elsize */
     offsetof(align_test, q), /* alignment */
     0,                      /* subarray */
     0,                      /* fields */
@@ -36,11 +67,13 @@ PyArray_Descr npyfloat_descr = {
     0,
 };
 
+/////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////// Numpy Functions ///////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////
 static PyObject *
 npyfloat_getitem(char *data, PyArrayObject *NPY_UNUSED(arr))
 {
-    float8bit q;
-
+    ieee754 q;
     memcpy(&q, data, sizeof(q));
     return PyFlt_FromFlt(q);
 }
@@ -48,7 +81,7 @@ npyfloat_getitem(char *data, PyArrayObject *NPY_UNUSED(arr))
 static int
 npyfloat_setitem(PyObject *item, void *data, void *NPY_UNUSED(arr))
 {
-    float8bit q;
+    ieee754 q;
 
     if (PyFlt_Check(item)) {
         q = ((PyFlt*)item)->obval;
@@ -62,11 +95,11 @@ npyfloat_setitem(PyObject *item, void *data, void *NPY_UNUSED(arr))
 }
 
 static void
-byteswap(float8bit* x)
+byteswap(ieee754* x)
 {
-    size_t n = sizeof(float8bit), i;
+    size_t n = sizeof(ieee754), i;
     union swapped {
-        float8bit* value;
+        ieee754* value;
         char* data;
     } s = {x};
     char tmp;
@@ -81,12 +114,12 @@ byteswap(float8bit* x)
 static void
 npyfloat_copyswap(void* dst, void* src, int swap, void* NPY_UNUSED(arr))
 {
-    float8bit *q;
+    ieee754 *q;
 
     if (!src) {
         return;
     }
-    q = (float8bit*)dst;
+    q = (ieee754*)dst;
     /* FIXME: memmove vs memcpy */
     memmove(q, src, sizeof(*q));
     if (swap) {
@@ -94,20 +127,24 @@ npyfloat_copyswap(void* dst, void* src, int swap, void* NPY_UNUSED(arr))
     }
 }
 
+//////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////// Casting from other types to mytype //////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////
+
 /**begin repeat
- * #from_type = npy_int8, npy_int16, npy_int32, npy_int64, float, double, long double#
- * #from_type_name = int8, int16, int32, int64, float, double, ldouble#
- * #from_npy_define = NPY_INT8, NPY_INT16, NPY_INT32, NPY_INT64, NPY_FLOAT, NPY_DOUBLE, NPY_LONGDOUBLE#
+ * #from_type = float, double, long double, npy_half#
+ * #from_type_name = float, double, ldouble, float16#
+ * #from_npy_define = NPY_FLOAT, NPY_DOUBLE, NPY_LONGDOUBLE, NPY_HALF#
  */
 static void
 npycast_@from_type_name@_to_flt(void* from, void* to, npy_intp n, void* NPY_UNUSED(fromarr), void* NPY_UNUSED(toarr))
 {
     const @from_type@ *typed_from = (@from_type@*)from;
-    float8bit *typed_to = (float8bit*)to;
+    ieee754 *typed_to = (ieee754*)to;
     npy_intp i;
 
     for (i = 0; i < n; i++) {
-        typed_to[i] = (float8bit)typed_from[i];
+        typed_to[i] = (ieee754)typed_from[i];
     }
 }
 
@@ -117,9 +154,11 @@ static int register_@from_type_name@_to_flt_cast(int npy_registered_floatnum)
     int safe = 1;
 
     if (PyArray_RegisterCastFunc(from_descr, npy_registered_floatnum, npycast_@from_type_name@_to_flt) < 0) {
+        std::cout << "Error";
         return -1;
     }
     if (safe && PyArray_RegisterCanCast(from_descr, npy_registered_floatnum, NPY_NOSCALAR) < 0) {
+        std::cout << "Error";
         return -1;
     }
 
@@ -128,35 +167,58 @@ static int register_@from_type_name@_to_flt_cast(int npy_registered_floatnum)
 
 /**end repeat**/
 
+//////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////// Casting from my type to other types to ///////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////
 
-/**begin repeat
- * #to_type = npy_int8, npy_int16, npy_int32, npy_int64, float, double, long double#
- * #to_type_name = int8, int16, int32, int64, float, double, ldouble#
- */
 static void
-npycast_flt_to_@to_type_name@(void* from, void* to, npy_intp n, void* NPY_UNUSED(fromarr), void* NPY_UNUSED(toarr))
+flt_to_float(ieee754 *ip, npy_uint32  *op, npy_intp n,
+               PyArrayObject *NPY_UNUSED(aip), PyArrayObject *NPY_UNUSED(aop))
 {
-    const float8bit *typed_from = (float8bit*)from;
-    @to_type@ *typed_to = (@to_type@*)to;
-    npy_intp i;
-
-    for (i = 0; i < n; i++) {
-        typed_to[i] = (@to_type@)typed_from[i];
-    }
+     for (npy_intp i = 0; i < n; ++i) { 
+            (op)[i] = ieee754_as_float(ip[i]); 
+        } 
 }
 
-static int register_myfloat_to_@to_type_name@_cast(int npy_registered_floatnum)
+static void
+flt_to_double(ieee754 *ip, npy_uint64  *op, npy_intp n,
+               PyArrayObject *NPY_UNUSED(aip), PyArrayObject *NPY_UNUSED(aop))
 {
-    PyArray_Descr* from_descr = &npyfloat_descr;
-
-    if (PyArray_RegisterCastFunc(from_descr, npy_registered_floatnum, npycast_flt_to_@to_type_name@) < 0) {
-        return -1;
-    }
-
-    return 0;
+     for (npy_intp i = 0; i < n; ++i) { 
+            (op)[i] = ieee754_as_double(ip[i]); 
+        } 
 }
-/**end repeat**/
 
+static void
+flt_to_Cdouble(ieee754 *ip, npy_uint64 *op, npy_intp n,
+               PyArrayObject *NPY_UNUSED(aip), PyArrayObject *NPY_UNUSED(aop))
+{
+     for (npy_intp i = 0; i < n; ++i) { 
+            (op)[i] = ieee754_as_Cdouble(ip[i]); 
+        } 
+}
+
+static void
+flt_to_Cfloat(ieee754 *ip, npy_uint32  *op, npy_intp n,
+               PyArrayObject *NPY_UNUSED(aip), PyArrayObject *NPY_UNUSED(aop))
+{
+     for (npy_intp i = 0; i < n; ++i) { 
+            (op)[i] = ieee754_as_Cfloat(ip[i]); 
+        } 
+}
+
+static void
+flt_to_half(ieee754 *ip, npy_half *op, npy_intp n,
+               PyArrayObject *NPY_UNUSED(aip), PyArrayObject *NPY_UNUSED(aop))
+{
+     for (npy_intp i = 0; i < n; ++i) { 
+            (op)[i] = ieee754_as_half(ip[i]); 
+        } 
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////// Numpy operators and functions for my type ////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////
 
 /*
  * ufunc
@@ -170,16 +232,84 @@ float_ufunc_add(char** args, npy_intp* dimensions, npy_intp* steps,
     int k;
 
     for (k = 0; k < n; k++) {
-        float8bit x = *(float8bit*)i0;
-        float8bit y = *(float8bit*)i1;
-        *(float8bit*)o = x + y;
+        ieee754 x = *(ieee754*)i0;
+        ieee754 y = *(ieee754*)i1;
+        *(ieee754*)o = x + y;
         i0 += is0; i1 += is1; o += os;
     }
 }
 
+void
+float_ufunc_subtract(char** args, npy_intp* dimensions, npy_intp* steps,
+	       void* data) 
+{
+    npy_intp is0 = steps[0], is1 = steps[1], os = steps[2], n = *dimensions;
+    char *i0 = args[0], *i1 = args[1], *o = args[2];
+    int k;
+
+    for (k = 0; k < n; k++) {
+        ieee754 x = *(ieee754*)i0;
+        ieee754 y = *(ieee754*)i1;
+        *(ieee754*)o = x - y;
+        i0 += is0; i1 += is1; o += os;
+    }
+}
+
+void
+float_ufunc_multiply(char** args, npy_intp* dimensions, npy_intp* steps,
+	       void* data) 
+{
+    npy_intp is0 = steps[0], is1 = steps[1], os = steps[2], n = *dimensions;
+    char *i0 = args[0], *i1 = args[1], *o = args[2];
+    int k;
+
+    for (k = 0; k < n; k++) {
+        ieee754 x = *(ieee754*)i0;
+        ieee754 y = *(ieee754*)i1;
+        *(ieee754*)o = x * y;
+        i0 += is0; i1 += is1; o += os;
+    }
+}
+
+void
+float_ufunc_divide(char** args, npy_intp* dimensions, npy_intp* steps,
+	       void* data) 
+{
+    npy_intp is0 = steps[0], is1 = steps[1], os = steps[2], n = *dimensions;
+    char *i0 = args[0], *i1 = args[1], *o = args[2];
+    int k;
+
+    for (k = 0; k < n; k++) {
+        ieee754 x = *(ieee754*)i0;
+        ieee754 y = *(ieee754*)i1;
+        *(ieee754*)o = x / y;
+        i0 += is0; i1 += is1; o += os;
+    }
+}
+
+void
+float_ufunc_dot(char *ip1, npy_intp is1, char *ip2, npy_intp is2, char *op, npy_intp n,
+           void *NPY_UNUSED(ignore))
+{
+    float tmp = 0.0f;
+    npy_intp i;
+
+    for (i = 0; i < n; i++, ip1 += is1, ip2 += is2) {
+        tmp += ieee754_as_float(*((ieee754 *)ip1)) *
+               ieee754_as_float(*((ieee754 *)ip2));
+    }
+    *((ieee754 *)op) = ieee754(tmp);
+}
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////// Registering operators and functions   ////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////
 int
 register_ufuncs(PyObject* np_module, int npy_registered_floatnum)
 {
+    // add function 
     PyUFuncObject* ufunc = (PyUFuncObject*)
 		PyObject_GetAttrString(np_module, "add");
     int args[3] = {npy_registered_floatnum, npy_registered_floatnum,
@@ -198,24 +328,81 @@ register_ufuncs(PyObject* np_module, int npy_registered_floatnum)
 				    float_ufunc_add, args, 0) < 0) {
         return -1;
     }
+    // sub function
+    PyUFuncObject* ufunc2 = (PyUFuncObject*)
+		PyObject_GetAttrString(np_module, "subtract");
 
+    if (!ufunc2) {
+        return -1;
+    }
+    if (ufunc2->nargs != 3) {
+        PyErr_Format(PyExc_AssertionError,
+		 "ufunc2 %s takes %d arguments, our loop takes %d", 
+                 "subtract", ufunc2->nargs, 3);
+        return -1;
+    }
+    if (PyUFunc_RegisterLoopForType(ufunc2, npy_registered_floatnum,
+				    float_ufunc_subtract, args, 0) < 0) {
+        return -1;
+    }
+
+    // mul function
+    PyUFuncObject* ufunc3 = (PyUFuncObject*)
+	PyObject_GetAttrString(np_module, "multiply");
+
+    if (!ufunc3) {
+        return -1;
+    }
+    if (ufunc2->nargs != 3) {
+        PyErr_Format(PyExc_AssertionError,
+		 "ufunc3 %s takes %d arguments, our loop takes %d", 
+                 "multiply", ufunc3->nargs, 3);
+        return -1;
+    }
+    if (PyUFunc_RegisterLoopForType(ufunc3, npy_registered_floatnum,
+				    float_ufunc_multiply, args, 0) < 0) {
+        return -1;
+    }
+
+    // div function
+    PyUFuncObject* ufunc4 = (PyUFuncObject*)
+	PyObject_GetAttrString(np_module, "divide");
+
+    if (!ufunc4) {
+        return -1;
+    }
+    if (ufunc2->nargs != 3) {
+        PyErr_Format(PyExc_AssertionError,
+		 "ufunc4 %s takes %d arguments, our loop takes %d", 
+                 "divide", ufunc4->nargs, 3);
+        return -1;
+    }
+    if (PyUFunc_RegisterLoopForType(ufunc4, npy_registered_floatnum,
+				    float_ufunc_divide, args, 0) < 0) {
+        return -1;
+    }
     return 0;
 }
+
+//////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////// Registering casting from other types to my type //////////////////
+//////////////////////////////////////////////////////////////////////////////////////////
 
 static int register_cast_functions(int npy_registered_floatnum)
 {
 /**begin repeat
- * #to_type_name = int8, int16, int32, int64, float, double, ldouble#
+ * #to_type_name = float, double, ldouble, float16#
  */
     if(register_@to_type_name@_to_flt_cast(npy_registered_floatnum) < 0) {
-        return -1;
-    }
-    if(register_myfloat_to_@to_type_name@_cast(npy_registered_floatnum) < 0) {
         return -1;
     }
 /**end repeat**/
     return 0;
 }
+
+//////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////// Call registering functions ///////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////
 
 void
 init_float_descriptor(PyObject* np_module)
@@ -226,6 +413,13 @@ init_float_descriptor(PyObject* np_module)
     NpyFloat_ArrFuncs.getitem = (PyArray_GetItemFunc*)npyfloat_getitem;
     NpyFloat_ArrFuncs.setitem = (PyArray_SetItemFunc*)npyfloat_setitem;
     NpyFloat_ArrFuncs.copyswap = (PyArray_CopySwapFunc*)npyfloat_copyswap;
+    NpyFloat_ArrFuncs.dotfunc = (PyArray_DotFunc*)float_ufunc_dot;
+
+    NpyFloat_ArrFuncs.cast[NPY_FLOAT] = (PyArray_VectorUnaryFunc*)flt_to_float;
+    NpyFloat_ArrFuncs.cast[NPY_CFLOAT] = (PyArray_VectorUnaryFunc*)flt_to_Cfloat;
+    NpyFloat_ArrFuncs.cast[NPY_DOUBLE] = (PyArray_VectorUnaryFunc*)flt_to_double;
+    NpyFloat_ArrFuncs.cast[NPY_CDOUBLE] = (PyArray_VectorUnaryFunc*)flt_to_Cdouble;
+
 
     npyfloat_descr.ob_type = &PyArrayDescr_Type;
     npy_registered_floatnum = PyArray_RegisterDataType(&npyfloat_descr);
@@ -233,7 +427,7 @@ init_float_descriptor(PyObject* np_module)
         return;
     }
 
-    /* Support dtype(float8bit) syntax */
+    /* Support dtype(ieee754) syntax */
     if (PyDict_SetItemString(PyFloat_Type.tp_dict, "dtype",
 			     (PyObject*)&npyfloat_descr) < 0) {
         return;

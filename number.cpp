@@ -4,27 +4,26 @@
 /*
  * Number protocol
  */
-static inline float8bit
-float_add(float8bit x, float8bit y)
+static inline ieee754
+float_add(ieee754 x, ieee754 y)
 {
-    std::cout << "Float8bit add";
     return float(x) + float(y);
 }
 
-static inline float8bit
-float_subtract(float8bit x, float8bit y)
+static inline ieee754
+float_subtract(ieee754 x, ieee754 y)
 {
     return x - y;
 }
 
-static inline float8bit
-float_multiply(float8bit x, float8bit y)
+static inline ieee754
+float_multiply(ieee754 x, ieee754 y)
 {
     return x * y;
 }
 
-static inline float8bit
-float_divide(float8bit x, float8bit y)
+static inline ieee754
+float_divide(ieee754 x, ieee754 y)
 {
     return x / y;
 }
@@ -33,7 +32,7 @@ float_divide(float8bit x, float8bit y)
 #define _FLOAT_BINOP_IMPL(name, binop) \
     PyObject* \
     pyfloat_##name(PyObject* a, PyObject* b) { \
-        float8bit x, y; \
+        ieee754 x, y; \
         if(PyFlt_Check(a)) { \
             x = ((PyFlt*)a)->obval; \
         } \
